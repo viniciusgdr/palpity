@@ -3,8 +3,10 @@ package palpity
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -52,6 +54,77 @@ func New(opts ...Option) *Client {
 	return c
 }
 
+func WatchStatus(ctx context.Context, handler func(MarketStatus), opts ...Option) error {
+	client := New(append(opts, WithEvents(EventOddsUpdate|EventNewRound))...)
+	if err := configureStatusHandlers(client, handler); err != nil {
+		return err
+	}
+	return client.Start(ctx)
+}
+
+func GetStatus(ctx context.Context, opts ...Option) (*MarketStatus, error) {
+	return getStatusWithWatcher(ctx, func(watchCtx context.Context, handler func(MarketStatus)) error {
+		return WatchStatus(watchCtx, handler, opts...)
+	})
+}
+
+func getStatusWithWatcher(ctx context.Context, watcher func(context.Context, func(MarketStatus)) error) (*MarketStatus, error) {
+	childCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	statusCh := make(chan MarketStatus, 1)
+	errCh := make(chan error, 1)
+
+	go func() {
+		errCh <- watcher(childCtx, func(status MarketStatus) {
+			select {
+			case statusCh <- status:
+			default:
+			}
+			cancel()
+		})
+	}()
+
+	for {
+		select {
+		case status := <-statusCh:
+			return &status, nil
+		case err := <-errCh:
+			if err == nil || errors.Is(err, context.Canceled) {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				continue
+			}
+			return nil, err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+}
+
+func configureStatusHandlers(client *Client, handler func(MarketStatus)) error {
+	if handler == nil {
+		return fmt.Errorf("status handler is nil")
+	}
+
+	emitStatus := func() {
+		status := client.CurrentStatus()
+		if status != nil {
+			handler(*status)
+		}
+	}
+
+	client.OnNewRound = func(Market) {
+		emitStatus()
+	}
+	client.OnOddsUpdate = func(OddsUpdateEvent) {
+		emitStatus()
+	}
+
+	return nil
+}
+
 func (c *Client) Start(ctx context.Context) error {
 	market, err := c.fetcher.discoverActiveMarket()
 	if err != nil {
@@ -85,8 +158,27 @@ func (c *Client) CurrentMarket() *Market {
 	if c.market == nil {
 		return nil
 	}
-	cp := *c.market
+	cp := cloneMarketSnapshot(c.market)
 	return &cp
+}
+
+func (c *Client) CurrentStatus() *MarketStatus {
+	market := c.CurrentMarket()
+	if market == nil {
+		return nil
+	}
+	return &MarketStatus{
+		MarketID:              market.ID,
+		Slug:                  market.Slug,
+		Title:                 market.Title,
+		CurrentTotal:          market.CurrentTotal,
+		ValueNeeded:           market.Metadata.ValueNeeded,
+		ClosesAt:              market.ClosesAt,
+		BettingClosesAt:       market.BettingClosesAt,
+		TimeUntilClose:        durationUntil(market.ClosesAt),
+		TimeUntilBettingClose: durationUntil(market.BettingClosesAt),
+		Selections:            append([]Selection(nil), market.Selections...),
+	}
 }
 
 func (c *Client) Close() {
@@ -131,6 +223,7 @@ func (c *Client) dispatchEvent(channel string, event string, data json.RawMessag
 			c.emitError(fmt.Errorf("parse car count: %w", err))
 			return
 		}
+		c.updateCarCount(e)
 		if c.OnCarCount != nil {
 			c.OnCarCount(e)
 		}
@@ -144,6 +237,7 @@ func (c *Client) dispatchEvent(channel string, event string, data json.RawMessag
 			c.emitError(fmt.Errorf("parse odds update: %w", err))
 			return
 		}
+		c.updateOdds(e)
 		if c.OnOddsUpdate != nil {
 			c.OnOddsUpdate(e)
 		}
@@ -236,7 +330,8 @@ func (c *Client) fireNewRound(m *Market) {
 		return
 	}
 	if c.OnNewRound != nil {
-		c.OnNewRound(*m)
+		snapshot := cloneMarketSnapshot(m)
+		c.OnNewRound(snapshot)
 	}
 }
 
@@ -282,4 +377,81 @@ func (c *Client) emitError(err error) {
 	} else {
 		c.logger.Error("client error", "error", err)
 	}
+}
+
+func (c *Client) updateCarCount(event CarCountEvent) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.market == nil {
+		return
+	}
+	c.market.CurrentTotal = event.CurrentTotal
+	c.market.GraphData = append(c.market.GraphData, GraphPoint{
+		ID:           event.ID,
+		Value:        event.Value,
+		CurrentTotal: event.CurrentTotal,
+		Timestamp:    event.Timestamp,
+	})
+}
+
+func (c *Client) updateOdds(event OddsUpdateEvent) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.market == nil || c.market.ID != event.MarketID {
+		return
+	}
+
+	selectionsByID := make(map[int]Selection, len(c.market.Selections))
+	selectionsByCode := make(map[string]Selection, len(c.market.Selections))
+	for _, selection := range c.market.Selections {
+		selectionsByID[selection.ID] = selection
+		selectionsByCode[selection.Code] = selection
+	}
+
+	updatedSelections := make([]Selection, 0, len(event.Selections))
+	for _, selectionUpdate := range event.Selections {
+		selection, ok := selectionsByID[selectionUpdate.SelectionID]
+		if !ok {
+			selection = selectionsByCode[selectionUpdate.SelectionCode]
+		}
+		selection.ID = selectionUpdate.SelectionID
+		selection.Code = selectionUpdate.SelectionCode
+		selection.Label = selectionUpdate.Label
+		selection.Percent = selectionUpdate.Percent
+		if odd, err := strconv.ParseFloat(selectionUpdate.Odd, 64); err == nil {
+			selection.Odd = odd
+		}
+		updatedSelections = append(updatedSelections, selection)
+	}
+
+	if len(updatedSelections) > 0 {
+		c.market.Selections = updatedSelections
+	}
+}
+
+func cloneMarketSnapshot(market *Market) Market {
+	clone := *market
+	clone.Selections = append([]Selection(nil), market.Selections...)
+	clone.GraphData = append([]GraphPoint(nil), market.GraphData...)
+	clone.RemainingSeconds = secondsUntil(clone.ClosesAt)
+	clone.RemainingBettingSeconds = secondsUntil(clone.BettingClosesAt)
+	if clone.CurrentTotal == 0 && len(clone.GraphData) > 0 {
+		clone.CurrentTotal = clone.GraphData[len(clone.GraphData)-1].CurrentTotal
+	}
+	return clone
+}
+
+func durationUntil(deadline time.Time) time.Duration {
+	if deadline.IsZero() {
+		return 0
+	}
+	remaining := time.Until(deadline)
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
+func secondsUntil(deadline time.Time) float64 {
+	return durationUntil(deadline).Seconds()
 }

@@ -7,6 +7,7 @@ type Market struct {
 	Slug                    string       `json:"slug"`
 	Title                   string       `json:"title"`
 	ClosesAt                time.Time    `json:"-"`
+	BettingClosesAt         time.Time    `json:"-"`
 	ClosesAtRaw             string       `json:"closesAt"`
 	RemainingSeconds        float64      `json:"remainingSeconds"`
 	RemainingBettingSeconds float64      `json:"remainingBettingSeconds"`
@@ -15,6 +16,7 @@ type Market struct {
 	Target                  string       `json:"target"`
 	MatchingSystem          string       `json:"matchingSystem"`
 	WinnerID                *int         `json:"winnerId"`
+	CurrentTotal            int          `json:"-"`
 	Metadata                Metadata     `json:"metadata"`
 	Selections              []Selection  `json:"selections"`
 	GraphData               []GraphPoint `json:"graphData"`
@@ -42,6 +44,19 @@ type GraphPoint struct {
 	Value        string `json:"value"`
 	CurrentTotal int    `json:"currentTotal"`
 	Timestamp    int64  `json:"timestamp"`
+}
+
+type MarketStatus struct {
+	MarketID              int
+	Slug                  string
+	Title                 string
+	CurrentTotal          int
+	ValueNeeded           int
+	ClosesAt              time.Time
+	BettingClosesAt       time.Time
+	TimeUntilClose        time.Duration
+	TimeUntilBettingClose time.Duration
+	Selections            []Selection
 }
 
 type CarCountEvent struct {

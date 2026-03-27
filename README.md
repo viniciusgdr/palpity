@@ -47,6 +47,38 @@ func main() {
 }
 ```
 
+    ## Consultar o Mercado Atual
+
+    Use `GetStatus()` quando você só quiser abrir a conexão, pegar o status atual do mercado e devolver esse snapshot para o seu código.
+
+    ```go
+    status, err := palpity.GetStatus(ctx)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    fmt.Printf("Faltam %.0fs para fechar o mercado\n", status.TimeUntilClose.Seconds())
+    for _, side := range status.Selections {
+        fmt.Printf("%s -> odd: %.2f (%s%%)\n", side.Label, side.Odd, side.Percent)
+    }
+    ```
+
+    Use `WatchStatus()` se quiser receber novos snapshots automaticamente sempre que uma nova rodada começar ou quando as odds forem atualizadas.
+
+    ```go
+    err := palpity.WatchStatus(ctx, func(status palpity.MarketStatus) {
+        fmt.Printf("Mercado %d | faltam %.0fs\n", status.MarketID, status.TimeUntilClose.Seconds())
+        for _, side := range status.Selections {
+            fmt.Printf("%s -> odd: %.2f (%s%%)\n", side.Label, side.Odd, side.Percent)
+        }
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    ```
+
+    Se você estiver usando um `Client` manualmente, também pode consultar `CurrentStatus()` ou `CurrentMarket()`. Todos esses acessos usam o último estado sincronizado pelo WebSocket, e o tempo restante é recalculado na hora da consulta.
+
 ## Eventos Disponíveis
 
 Cada evento pode ser ativado individualmente usando `WithEvents()`. Use `|` (OR) para combinar:
@@ -214,6 +246,20 @@ client.OnNewRound = func(m palpity.Market) {
 |----------------------------|------------------------------------------------------|
 | `WithEvents(EventType)`    | Define quais eventos receber (padrão: `EventAll`)    |
 | `WithLogger(*slog.Logger)` | Logger customizado (padrão: `slog.Default()`)        |
+
+## Métodos Úteis
+
+| Método             | Descrição                                                                 |
+|--------------------|---------------------------------------------------------------------------|
+| `CurrentStatus()`  | Retorna um snapshot enxuto com odds atuais, tempo restante e meta         |
+| `CurrentMarket()`  | Retorna o snapshot completo do mercado atual                              |
+
+## Funções Independentes
+
+| Função           | Descrição                                                                      |
+|------------------|--------------------------------------------------------------------------------|
+| `GetStatus()`    | Conecta, captura um único snapshot atual do mercado e devolve esse resultado   |
+| `WatchStatus()`  | Conecta e entrega novos snapshots ao longo da sessão                           |
 
 ## Comportamento Interno
 

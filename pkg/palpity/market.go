@@ -131,7 +131,6 @@ func parseRSCPayload(data []byte) (*Market, error) {
 			depth--
 			if depth == 0 {
 				jsonEnd = i + 1
-				break
 			}
 		}
 		if jsonEnd >= 0 {
@@ -151,12 +150,21 @@ func parseRSCPayload(data []byte) (*Market, error) {
 	}
 
 	closesAt, _ := time.Parse(time.RFC3339, apiData.ClosesAt)
+	bettingClosesAt := time.Now().Add(time.Duration(apiData.RemainingBettingSeconds * float64(time.Second)))
+	if !closesAt.IsZero() && apiData.RemainingSeconds >= apiData.RemainingBettingSeconds {
+		bettingClosesAt = closesAt.Add(-time.Duration((apiData.RemainingSeconds - apiData.RemainingBettingSeconds) * float64(time.Second)))
+	}
+	currentTotal := 0
+	if len(apiData.GraphData) > 0 {
+		currentTotal = apiData.GraphData[len(apiData.GraphData)-1].CurrentTotal
+	}
 
 	market := &Market{
 		ID:                      apiData.ID,
 		Slug:                    apiData.Slug,
 		Title:                   apiData.Title,
 		ClosesAt:                closesAt,
+		BettingClosesAt:         bettingClosesAt,
 		ClosesAtRaw:             apiData.ClosesAt,
 		RemainingSeconds:        apiData.RemainingSeconds,
 		RemainingBettingSeconds: apiData.RemainingBettingSeconds,
@@ -165,6 +173,7 @@ func parseRSCPayload(data []byte) (*Market, error) {
 		Target:                  apiData.Target,
 		MatchingSystem:          apiData.MatchingSystem,
 		WinnerID:                apiData.WinnerID,
+		CurrentTotal:            currentTotal,
 		Metadata:                apiData.Metadata,
 		Selections:              apiData.Selections,
 		GraphData:               apiData.GraphData,
