@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	baseURL         = "https://app.palpity.io"
+	baseURL         = "https://app.previsao.io"
 	rodoviaSlugBase = "rodovia-5-minutos-qu-"
 )
 

@@ -13,7 +13,7 @@ import (
 
 const (
 	pusherKey      = "l2zxrvk0g4lfl35q8cxr"
-	pusherHost     = "ws.palpity.io"
+	pusherHost     = "ws.previsao.io"
 	pusherProtocol = 7
 	pusherClient   = "go"
 	pusherVersion  = "1.0.0"
