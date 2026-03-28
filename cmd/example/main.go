@@ -26,6 +26,7 @@ func main() {
 	client.OnNewRound = func(m palpity.Market) {
 		fmt.Printf("\n=== NOVA RODADA ===\n")
 		fmt.Printf("ID: %d | Slug: %s\n", m.ID, m.Slug)
+		fmt.Printf("Rodovia: %s\n", m.RoadInfo())
 		fmt.Printf("Meta: %d carros\n", m.Metadata.ValueNeeded)
 		fmt.Printf("Tempo restante: %.0fs (apostas: %.0fs)\n", m.RemainingSeconds, m.RemainingBettingSeconds)
 		for _, s := range m.Selections {

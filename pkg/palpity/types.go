@@ -1,11 +1,15 @@
 package palpity
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type Market struct {
 	ID                      int          `json:"id"`
 	Slug                    string       `json:"slug"`
 	Title                   string       `json:"title"`
+	Description             string       `json:"description"`
 	ClosesAt                time.Time    `json:"-"`
 	BettingClosesAt         time.Time    `json:"-"`
 	ClosesAtRaw             string       `json:"closesAt"`
@@ -50,6 +54,7 @@ type MarketStatus struct {
 	MarketID              int
 	Slug                  string
 	Title                 string
+	Description           string
 	CurrentTotal          int
 	ValueNeeded           int
 	ClosesAt              time.Time
@@ -57,6 +62,49 @@ type MarketStatus struct {
 	TimeUntilClose        time.Duration
 	TimeUntilBettingClose time.Duration
 	Selections            []Selection
+}
+
+func (m Market) RoadInfo() string {
+	return roadInfoFromDescription(m.Description)
+}
+
+func (m Market) RoadName() string {
+	return roadNameFromDescription(m.Description)
+}
+
+func (s MarketStatus) RoadInfo() string {
+	return roadInfoFromDescription(s.Description)
+}
+
+func (s MarketStatus) RoadName() string {
+	return roadNameFromDescription(s.Description)
+}
+
+func roadInfoFromDescription(description string) string {
+	for _, line := range strings.Split(strings.ReplaceAll(description, "\r\n", "\n"), "\n") {
+		trimmed := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "•"))
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func roadNameFromDescription(description string) string {
+	roadInfo := roadInfoFromDescription(description)
+	if roadInfo == "" {
+		return ""
+	}
+
+	if commaIndex := strings.Index(roadInfo, ","); commaIndex >= 0 {
+		return strings.TrimSpace(roadInfo[:commaIndex])
+	}
+
+	if separatorIndex := strings.Index(roadInfo, " — "); separatorIndex >= 0 {
+		return strings.TrimSpace(roadInfo[:separatorIndex])
+	}
+
+	return strings.TrimSpace(strings.TrimSuffix(roadInfo, "."))
 }
 
 type CarCountEvent struct {

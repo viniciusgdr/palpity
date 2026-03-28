@@ -171,6 +171,7 @@ func (c *Client) CurrentStatus() *MarketStatus {
 		MarketID:              market.ID,
 		Slug:                  market.Slug,
 		Title:                 market.Title,
+		Description:           market.Description,
 		CurrentTotal:          market.CurrentTotal,
 		ValueNeeded:           market.Metadata.ValueNeeded,
 		ClosesAt:              market.ClosesAt,

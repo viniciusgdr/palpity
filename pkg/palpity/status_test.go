@@ -14,6 +14,7 @@ func TestConfigureStatusHandlersEmitsSnapshot(t *testing.T) {
 			ID:              19071,
 			Slug:            "rodovia-5-minutos-qu-19071",
 			Title:           "Rodovia (5 minutos): quantos carros?",
+			Description:     "• Doutor Manoel Hyppolito Rego, KM 110 — Caraguatatuba (SP).\n• Este mercado funciona 24 horas por dia.",
 			ClosesAt:        now.Add(40 * time.Second),
 			BettingClosesAt: now.Add(20 * time.Second),
 			CurrentTotal:    7,
@@ -42,6 +43,9 @@ func TestConfigureStatusHandlersEmitsSnapshot(t *testing.T) {
 	}
 	if len(received[0].Selections) != 2 {
 		t.Fatalf("expected 2 selections, got %d", len(received[0].Selections))
+	}
+	if received[0].RoadName() != "Doutor Manoel Hyppolito Rego" {
+		t.Fatalf("expected road name helper to parse description, got %q", received[0].RoadName())
 	}
 	if received[0].TimeUntilClose <= 0 {
 		t.Fatalf("expected positive close duration, got %s", received[0].TimeUntilClose)

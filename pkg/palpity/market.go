@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -149,6 +150,8 @@ func parseRSCPayload(data []byte) (*Market, error) {
 		return nil, fmt.Errorf("parse initialData: %w", err)
 	}
 
+	apiData.Description = resolveRSCTextReference(body, apiData.Description)
+
 	closesAt, _ := time.Parse(time.RFC3339, apiData.ClosesAt)
 	bettingClosesAt := time.Now().Add(time.Duration(apiData.RemainingBettingSeconds * float64(time.Second)))
 	if !closesAt.IsZero() && apiData.RemainingSeconds >= apiData.RemainingBettingSeconds {
@@ -163,6 +166,7 @@ func parseRSCPayload(data []byte) (*Market, error) {
 		ID:                      apiData.ID,
 		Slug:                    apiData.Slug,
 		Title:                   apiData.Title,
+		Description:             apiData.Description,
 		ClosesAt:                closesAt,
 		BettingClosesAt:         bettingClosesAt,
 		ClosesAtRaw:             apiData.ClosesAt,
@@ -180,4 +184,37 @@ func parseRSCPayload(data []byte) (*Market, error) {
 	}
 
 	return market, nil
+}
+
+func resolveRSCTextReference(body string, value string) string {
+	if value == "" || !strings.HasPrefix(value, "$") {
+		return value
+	}
+
+	referenceID := strings.TrimPrefix(value, "$")
+	marker := referenceID + ":T"
+	markerIndex := strings.Index(body, marker)
+	if markerIndex < 0 {
+		return value
+	}
+
+	lengthStart := markerIndex + len(marker)
+	commaOffset := strings.IndexByte(body[lengthStart:], ',')
+	if commaOffset < 0 {
+		return value
+	}
+
+	commaIndex := lengthStart + commaOffset
+	textLength, err := strconv.ParseInt(body[lengthStart:commaIndex], 16, 64)
+	if err != nil || textLength < 0 {
+		return value
+	}
+
+	textStart := commaIndex + 1
+	textEnd := textStart + int(textLength)
+	if textEnd > len(body) {
+		return value
+	}
+
+	return body[textStart:textEnd]
 }

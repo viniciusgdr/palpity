@@ -13,6 +13,7 @@ func TestCurrentMarketReturnsDeepCopy(t *testing.T) {
 		market: &Market{
 			ID:              19068,
 			Slug:            "rodovia-5-minutos-qu-19068",
+			Description:     "• Floriano Rodrigues Pinheiro, KM 46 — Campos do Jordão (SP).\n• Este mercado roda recorrentemente a cada 5 minutos.",
 			ClosesAt:        now.Add(30 * time.Second),
 			BettingClosesAt: now.Add(10 * time.Second),
 			CurrentTotal:    42,
@@ -44,6 +45,9 @@ func TestCurrentMarketReturnsDeepCopy(t *testing.T) {
 	if again.CurrentTotal != 42 {
 		t.Fatalf("expected current total to stay unchanged, got %d", again.CurrentTotal)
 	}
+	if again.RoadName() != "Floriano Rodrigues Pinheiro" {
+		t.Fatalf("expected road name to be preserved, got %q", again.RoadName())
+	}
 	if again.RemainingSeconds <= 0 || again.RemainingSeconds > 31 {
 		t.Fatalf("expected dynamic remaining seconds, got %.2f", again.RemainingSeconds)
 	}
@@ -57,6 +61,7 @@ func TestCurrentStatusReflectsLiveUpdates(t *testing.T) {
 			ID:              19068,
 			Slug:            "rodovia-5-minutos-qu-19068",
 			Title:           "Rodovia (5 minutos): quantos carros?",
+			Description:     "• Floriano Rodrigues Pinheiro, KM 46 — Campos do Jordão (SP).\n• Este mercado roda recorrentemente a cada 5 minutos.",
 			ClosesAt:        now.Add(30 * time.Second),
 			BettingClosesAt: now.Add(12 * time.Second),
 			CurrentTotal:    20,
@@ -98,6 +103,9 @@ func TestCurrentStatusReflectsLiveUpdates(t *testing.T) {
 	}
 	if status.ValueNeeded != 116 {
 		t.Fatalf("expected value needed 116, got %d", status.ValueNeeded)
+	}
+	if status.RoadInfo() != "Floriano Rodrigues Pinheiro, KM 46 — Campos do Jordão (SP)." {
+		t.Fatalf("expected road info to be available, got %q", status.RoadInfo())
 	}
 	if len(status.Selections) != 2 {
 		t.Fatalf("expected 2 selections, got %d", len(status.Selections))
