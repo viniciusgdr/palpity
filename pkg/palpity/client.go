@@ -130,6 +130,9 @@ func (c *Client) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("discover market: %w", err)
 	}
+	if !isRodoviaMarket(market) {
+		return fmt.Errorf("discover market returned non-rodovia market %q", market.Slug)
+	}
 
 	c.mu.Lock()
 	c.market = market
@@ -268,7 +271,7 @@ func (c *Client) dispatchEvent(channel string, event string, data json.RawMessag
 		}
 
 	case eventNameChartUpdate:
-		if c.events&EventChartUpdate == 0 {
+		if c.events&(EventChartUpdate|EventOddsUpdate) == 0 {
 			return
 		}
 		var e ChartUpdateEvent
@@ -276,8 +279,13 @@ func (c *Client) dispatchEvent(channel string, event string, data json.RawMessag
 			c.emitError(fmt.Errorf("parse chart update: %w", err))
 			return
 		}
+		if synthesized := c.updateOddsFromChart(e); synthesized != nil && c.events&EventOddsUpdate != 0 && c.OnOddsUpdate != nil {
+			c.OnOddsUpdate(*synthesized)
+		}
 		if c.OnChartUpdate != nil {
-			c.OnChartUpdate(e)
+			if c.events&EventChartUpdate != 0 {
+				c.OnChartUpdate(e)
+			}
 		}
 	}
 }
@@ -299,13 +307,13 @@ func (c *Client) handleRoundTransition() {
 		time.Sleep(5 * time.Second)
 
 		m, err := c.fetcher.fetchNextMarket(current.ID)
-		if err == nil && m != nil && m.ID != current.ID {
+		if err == nil && isNextRoundMarket(current, m) {
 			next = m
 			break
 		}
 
 		m, err = c.fetcher.discoverActiveMarket()
-		if err == nil && m != nil && m.ID != current.ID {
+		if err == nil && isNextRoundMarket(current, m) {
 			next = m
 			break
 		}
@@ -324,6 +332,13 @@ func (c *Client) handleRoundTransition() {
 
 	c.subscribeMarket(next)
 	c.fireNewRound(next)
+}
+
+func isNextRoundMarket(current *Market, candidate *Market) bool {
+	if current == nil || !isRodoviaMarket(candidate) {
+		return false
+	}
+	return candidate.ID > current.ID
 }
 
 func (c *Client) fireNewRound(m *Market) {
@@ -428,6 +443,78 @@ func (c *Client) updateOdds(event OddsUpdateEvent) {
 	if len(updatedSelections) > 0 {
 		c.market.Selections = updatedSelections
 	}
+}
+
+func (c *Client) updateOddsFromChart(event ChartUpdateEvent) *OddsUpdateEvent {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.market == nil || c.market.ID != event.MarketID {
+		return nil
+	}
+
+	selectionIndexesByID := make(map[int]int, len(c.market.Selections))
+	selectionIndexesByLabel := make(map[string]int, len(c.market.Selections))
+	for index, selection := range c.market.Selections {
+		selectionIndexesByID[selection.ID] = index
+		selectionIndexesByLabel[selection.Label] = index
+	}
+
+	synthesized := OddsUpdateEvent{
+		MarketID:  event.MarketID,
+		Slug:      event.Slug,
+		UpdatedAt: event.UpdatedAt,
+	}
+	changed := false
+
+	for _, chartSelection := range event.Data {
+		if len(chartSelection.Data) == 0 {
+			continue
+		}
+
+		selectionIndex, ok := selectionIndexesByID[chartSelection.ID]
+		if !ok {
+			selectionIndex, ok = selectionIndexesByLabel[chartSelection.Label]
+		}
+		if !ok {
+			continue
+		}
+
+		selection := c.market.Selections[selectionIndex]
+		lastPoint := chartSelection.Data[len(chartSelection.Data)-1]
+		normalizedPercent := normalizeNumericString(lastPoint.Prob)
+
+		if selection.ID != chartSelection.ID || selection.Label != chartSelection.Label || selection.Odd != lastPoint.Odd || selection.Percent != normalizedPercent {
+			changed = true
+		}
+
+		selection.ID = chartSelection.ID
+		selection.Label = chartSelection.Label
+		selection.Odd = lastPoint.Odd
+		selection.Percent = normalizedPercent
+		c.market.Selections[selectionIndex] = selection
+
+		synthesized.Selections = append(synthesized.Selections, SelectionUpdate{
+			SelectionID:   selection.ID,
+			SelectionCode: selection.Code,
+			Label:         selection.Label,
+			Percent:       selection.Percent,
+			Odd:           strconv.FormatFloat(selection.Odd, 'f', -1, 64),
+		})
+	}
+
+	if !changed || len(synthesized.Selections) == 0 {
+		return nil
+	}
+
+	return &synthesized
+}
+
+func normalizeNumericString(value string) string {
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return value
+	}
+	return strconv.FormatFloat(parsed, 'f', -1, 64)
 }
 
 func cloneMarketSnapshot(market *Market) Market {

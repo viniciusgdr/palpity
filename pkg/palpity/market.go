@@ -12,16 +12,19 @@ import (
 )
 
 const (
-	baseURL         = "https://app.previsao.io"
-	rodoviaSlugBase = "rodovia-5-minutos-qu-"
+	baseURL             = "https://app.previsao.io"
+	rodoviaSlugBase     = "rodovia-5-minutos-qu-"
+	nextMarketLookahead = 12
 )
 
 type marketFetcher struct {
+	baseURL    string
 	httpClient *http.Client
 }
 
 func newMarketFetcher() *marketFetcher {
 	return &marketFetcher{
+		baseURL: baseURL,
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
 			Transport: &http.Transport{
@@ -34,7 +37,7 @@ func newMarketFetcher() *marketFetcher {
 }
 
 func (f *marketFetcher) fetchMarket(id int, slug string) (*Market, error) {
-	urlPath := fmt.Sprintf("%s/live/%d-market/%s", baseURL, id, slug)
+	urlPath := fmt.Sprintf("%s/live/%d-market/%s", f.baseURL, id, slug)
 
 	req, err := http.NewRequest(http.MethodGet, urlPath, nil)
 	if err != nil {
@@ -65,13 +68,35 @@ func (f *marketFetcher) fetchMarket(id int, slug string) (*Market, error) {
 }
 
 func (f *marketFetcher) fetchNextMarket(currentID int) (*Market, error) {
-	nextID := currentID + 3
-	nextSlug := fmt.Sprintf("%s%d", rodoviaSlugBase, nextID)
-	return f.fetchMarket(nextID, nextSlug)
+	var lastErr error
+
+	for candidateID := currentID + 1; candidateID <= currentID+nextMarketLookahead; candidateID++ {
+		candidateSlug := fmt.Sprintf("%s%d", rodoviaSlugBase, candidateID)
+		market, err := f.fetchMarket(candidateID, candidateSlug)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if !isRodoviaMarket(market) {
+			lastErr = fmt.Errorf("candidate id %d resolved to non-rodovia market %q", candidateID, market.Slug)
+			continue
+		}
+		if market.ID <= currentID {
+			lastErr = fmt.Errorf("candidate id %d resolved to stale rodovia market %d", candidateID, market.ID)
+			continue
+		}
+		return market, nil
+	}
+
+	if lastErr != nil {
+		return nil, lastErr
+	}
+
+	return nil, fmt.Errorf("next rodovia market not found after id %d", currentID)
 }
 
 func (f *marketFetcher) discoverActiveMarket() (*Market, error) {
-	req, err := http.NewRequest(http.MethodGet, baseURL, nil)
+	req, err := http.NewRequest(http.MethodGet, f.baseURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create homepage request: %w", err)
 	}
@@ -217,4 +242,8 @@ func resolveRSCTextReference(body string, value string) string {
 	}
 
 	return body[textStart:textEnd]
+}
+
+func isRodoviaMarket(market *Market) bool {
+	return market != nil && strings.HasPrefix(market.Slug, rodoviaSlugBase)
 }

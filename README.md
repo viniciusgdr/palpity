@@ -1,6 +1,6 @@
 # Palpity — Go SDK para Rodovia (5 minutos)
 
-Pacote Go que conecta ao mercado **Rodovia (5 minutos): quantos carros?** do [Palpity](https://app.palpity.io/) via WebSocket em tempo real.
+Pacote Go que conecta ao mercado **Rodovia (5 minutos): quantos carros?** do [Palpity](https://app.previsao.io/) via WebSocket em tempo real.
 
 Recebe eventos de contagem de carros, mudanças de odds, apostas, encerramento de rodada e transição automática entre rodadas.
 
